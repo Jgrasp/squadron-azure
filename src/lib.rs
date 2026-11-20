@@ -1,9 +1,33 @@
 use serde_json::{Value, json};
+use squadron_extension_api::forge::{self, BranchArgs, Input, NoArgs, NumberArgs};
 use squadron_extension_api::{Account, Extension, host, squadron_extension};
 
 mod api;
+mod pulls;
+mod reads;
+
+use reads::Repo;
 
 struct Azure;
+
+fn on_repo<A, T>(
+    input: &str,
+    work: impl Fn(&Repo, &A) -> Result<T, String>,
+) -> Result<String, String>
+where
+    A: Default + serde::de::DeserializeOwned,
+    T: serde::Serialize,
+{
+    let asked: Input<A> = forge::input(input)?;
+    let (org, project, name) = reads::parts(&asked.repo, &asked.groups)?;
+    let repo = Repo {
+        account: api::account(&org)?,
+        org,
+        project,
+        name,
+    };
+    forge::answer(&work(&repo, &asked.args)?)
+}
 
 fn checked(status: u16, body: &str) -> Result<String, String> {
     let found: Value = serde_json::from_str(body).unwrap_or_default();
@@ -43,6 +67,24 @@ impl Extension for Azure {
         let request = api::request("GET", api::connection_url(&org), &account.id, None);
         let found = host::fetch(&request)?;
         checked(found.status, &found.body)
+    }
+
+    fn forge(call: String, input: String) -> Result<String, String> {
+        match call.as_str() {
+            "pull" => on_repo(&input, |repo, args: &BranchArgs| {
+                reads::pull(repo, &args.branch)
+            }),
+            "numbered" => on_repo(&input, |repo, args: &NumberArgs| {
+                reads::numbered(repo, args.number)
+            }),
+            "lists" => on_repo(&input, |repo, _: &NoArgs| reads::lists(repo)),
+            "remarks" => on_repo(&input, |repo, args: &NumberArgs| {
+                reads::remarks(repo, args.number)
+            }),
+            "me" => on_repo(&input, |repo, _: &NoArgs| reads::me(repo)),
+            "runs" => on_repo(&input, |repo, _: &NoArgs| reads::runs(repo)),
+            _ => Err(forge::unsupported(&call)),
+        }
     }
 }
 
