@@ -213,16 +213,30 @@ pub fn opened(error: String) -> String {
     )
 }
 
-pub fn create(repo: &Repo, args: &CreateArgs) -> Result<Pull, String> {
-    let created = send(
-        repo,
-        "POST",
+pub fn creating(
+    repo: &Repo,
+    args: &CreateArgs,
+    post: impl FnOnce(&str, Value) -> Result<Value, String>,
+    fill: impl FnOnce(&Value) -> Pull,
+) -> Result<Pull, String> {
+    let created = post(
         &format!("{}/pullrequests", repo.repository()),
-        Some(opening(args)),
+        opening(args),
     )
     .map_err(opened)?;
-    let me = me_id(repo).unwrap_or_default();
-    Ok(filled(repo, &[&created], &me).remove(0))
+    Ok(fill(&created))
+}
+
+pub fn create(repo: &Repo, args: &CreateArgs) -> Result<Pull, String> {
+    creating(
+        repo,
+        args,
+        |url, body| send(repo, "POST", url, Some(body)),
+        |created| {
+            let me = me_id(repo).unwrap_or_default();
+            filled(repo, &[created], &me).remove(0)
+        },
+    )
 }
 
 #[cfg(test)]
@@ -378,5 +392,85 @@ mod tests {
             opened("Azure DevOps answered 400: no".into()),
             "Azure DevOps answered 400: no"
         );
+    }
+
+    #[test]
+    fn creates_and_answers_the_pull_request() {
+        let repo = Repo {
+            account: "a1".into(),
+            org: "org".into(),
+            project: "proj".into(),
+            name: "shop".into(),
+        };
+        let asked = CreateArgs {
+            branch: "feat/x".into(),
+            base: "main".into(),
+            title: "Export to Xero".into(),
+            description: "Sends the ledger".into(),
+            draft: true,
+        };
+        let mut posted = None;
+        let pull = creating(
+            &repo,
+            &asked,
+            |url, body| {
+                posted = Some((url.to_string(), body.clone()));
+                Ok(json!({
+                    "pullRequestId": 21, "status": "active", "isDraft": body["isDraft"],
+                    "title": body["title"], "description": body["description"],
+                    "sourceRefName": body["sourceRefName"], "targetRefName": body["targetRefName"],
+                    "mergeStatus": "queued", "creationDate": "2026-11-20T16:00:00Z",
+                    "createdBy": { "displayName": "Quentin Briais" },
+                    "lastMergeSourceCommit": { "commitId": "9f1c" }
+                }))
+            },
+            |created| crate::pulls::pull_of(created, &Value::Null, &Value::Null, "", &repo.slug()),
+        )
+        .unwrap();
+        let (url, body) = posted.unwrap();
+        assert_eq!(
+            url,
+            "https://dev.azure.com/org/proj/_apis/git/repositories/shop/pullrequests"
+        );
+        assert_eq!(
+            (
+                &body["sourceRefName"],
+                &body["targetRefName"],
+                &body["isDraft"]
+            ),
+            (
+                &json!("refs/heads/feat/x"),
+                &json!("refs/heads/main"),
+                &json!(true)
+            )
+        );
+        assert_eq!(
+            (
+                pull.number,
+                pull.draft,
+                pull.state.as_str(),
+                pull.branch.as_str(),
+                pull.base.as_str(),
+                pull.title.as_str(),
+                pull.url.as_str()
+            ),
+            (
+                21,
+                true,
+                "open",
+                "feat/x",
+                "main",
+                "Export to Xero",
+                "https://dev.azure.com/org/proj/_git/shop/pullrequest/21"
+            )
+        );
+        let refused = creating(
+            &repo,
+            &asked,
+            |_, _| Err("Azure DevOps answered 409: TF401179: An active pull request for the source and target branch already exists.".into()),
+            |_| unreachable!(),
+        )
+        .unwrap_err();
+        assert!(refused.contains("\"code\":\"exists\""));
     }
 }
