@@ -4,7 +4,7 @@ A [Squadron](https://github.com/Jgrasp/squadron) extension that brings the pull 
 
 ## Use
 
-In Settings › Extensions › Azure DevOps, add an account with the name of your organization (or its address, `https://dev.azure.com/<organization>`) and a [personal access token](https://learn.microsoft.com/azure/devops/organizations/accounts/use-personal-access-tokens-to-authenticate): in Azure DevOps, open User settings › Personal access tokens, choose **New Token**, name it Squadron, pick **Custom defined**, then tick these scopes:
+In Settings › Extensions › Azure DevOps, add an account with the name of your organization, as in `dev.azure.com/<organization>`, and a [personal access token](https://learn.microsoft.com/azure/devops/organizations/accounts/use-personal-access-tokens-to-authenticate): in Azure DevOps, open User settings › Personal access tokens, choose **New Token**, name it Squadron, pick **Custom defined**, then tick these scopes:
 
 - **Code**: Read & write
 - **Build**: Read

@@ -59,14 +59,30 @@ fn checked(status: u16, body: &str) -> Result<String, String> {
     }
 }
 
+fn named(org: &str) -> Result<(), String> {
+    if !org.is_empty()
+        && org
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))
+    {
+        return Ok(());
+    }
+    Err(json!({
+        "title": { "en": "Enter the organization's name alone, as in dev.azure.com/<name>", "fr": "Saisissez le nom de l’organisation seul, comme dans dev.azure.com/<nom>" },
+        "field": "organization"
+    })
+    .to_string())
+}
+
 impl Extension for Azure {
     fn check_account(account: Account) -> Result<String, String> {
         let org = account
             .fields
             .iter()
             .find(|(k, _)| k == "organization")
-            .map(|(_, v)| api::organization(v))
+            .map(|(_, v)| v.trim().to_lowercase())
             .unwrap_or_default();
+        named(&org)?;
         let request = api::request("GET", api::connection_url(&org), &account.id, None);
         let found = host::fetch(&request)?;
         checked(found.status, &found.body)
@@ -224,5 +240,15 @@ mod tests {
         let unknown: Value = serde_json::from_str(&checked(404, "").unwrap_err()).unwrap();
         assert_eq!(unknown["field"], "organization");
         assert_eq!(checked(500, "").unwrap_err(), "Azure DevOps answered 500.");
+        assert!(named("fabrikam").is_ok() && named("my-org_2.x").is_ok());
+        for typed in [
+            "https://dev.azure.com/fabrikam",
+            "dev.azure.com/fabrikam",
+            "a:b",
+            "",
+        ] {
+            let wrong: Value = serde_json::from_str(&named(typed).unwrap_err()).unwrap();
+            assert_eq!(wrong["field"], "organization", "{typed}");
+        }
     }
 }

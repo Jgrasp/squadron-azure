@@ -20,8 +20,8 @@
           "id": "organization",
           "label": { "en": "Organization", "fr": "Organisation" },
           "hint": {
-            "en": "Its name, or its address https://dev.azure.com/…",
-            "fr": "Son nom, ou son adresse https://dev.azure.com/…"
+            "en": "Its name alone, as in dev.azure.com/<name>",
+            "fr": "Son nom seul, comme dans dev.azure.com/<nom>"
           }
         },
         {
