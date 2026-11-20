@@ -1,6 +1,6 @@
 {
   "id": "azure",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "api": 1,
   "squadron": ">=0.56.0",
   "name": { "en": "Azure DevOps", "fr": "Azure DevOps" },
@@ -46,7 +46,7 @@
         "https?://(?:www\\.)?dev\\.azure\\.com/(?<org>[A-Za-z0-9_.-]+)/(?<project>[^/?#\\s]+)/_git/(?<name>[^/?#\\s]+)/pullrequest/(?<number>[0-9]+)",
         "https?://(?<org>[A-Za-z0-9_.-]+)\\.visualstudio\\.com/(?:[^/?#\\s]+/)*(?<project>[^/?#\\s]+)/_git/(?<name>[^/?#\\s]+)/pullrequest/(?<number>[0-9]+)"
       ],
-      "calls": ["pull", "numbered", "lists", "remarks", "me", "reply", "resolve", "post", "merge", "update", "runs"]
+      "calls": ["pull", "numbered", "lists", "remarks", "me", "reply", "resolve", "post", "merge", "update", "create", "runs"]
     }
   }
 }
