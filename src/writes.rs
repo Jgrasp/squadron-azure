@@ -1,7 +1,9 @@
 use crate::api;
 use crate::reads::{Repo, me_id};
 use serde_json::{Map, Value, json};
-use squadron_extension_api::forge::{Draft, PostArgs, Posted, ReplyArgs, ResolveArgs, UpdateArgs};
+use squadron_extension_api::forge::{
+    Draft, MergeArgs, PostArgs, Posted, ReplyArgs, ResolveArgs, UpdateArgs,
+};
 
 pub fn remark_id(to: &str) -> Result<(u64, u64), String> {
     to.split_once(':')
@@ -120,18 +122,36 @@ pub fn post(repo: &Repo, args: &PostArgs) -> Result<Posted, String> {
     })
 }
 
-pub fn merge(repo: &Repo, number: u64) -> Result<(), String> {
-    let path = repo.pull_api(number);
+pub fn completion(found: &Value, args: &MergeArgs) -> Result<Value, String> {
+    let mut body =
+        json!({ "status": "completed", "lastMergeSourceCommit": found["lastMergeSourceCommit"] });
+    if args.method.is_none() && args.delete_branch.is_none() {
+        return Ok(body);
+    }
+    let mut options = found["completionOptions"]
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+    if let Some(method) = &args.method {
+        let strategy = match method.as_str() {
+            "merge" => "noFastForward",
+            "squash" => "squash",
+            "rebase" => "rebase",
+            other => return Err(format!("Azure DevOps cannot merge with {other}.")),
+        };
+        options.insert("mergeStrategy".into(), json!(strategy));
+    }
+    if let Some(delete) = args.delete_branch {
+        options.insert("deleteSourceBranch".into(), json!(delete));
+    }
+    body["completionOptions"] = Value::Object(options);
+    Ok(body)
+}
+
+pub fn merge(repo: &Repo, args: &MergeArgs) -> Result<(), String> {
+    let path = repo.pull_api(args.number);
     let found = repo.get(&path, &[])?;
-    send(
-        repo,
-        "PATCH",
-        &path,
-        Some(
-            json!({ "status": "completed", "lastMergeSourceCommit": found["lastMergeSourceCommit"] }),
-        ),
-    )
-    .map(|_| ())
+    send(repo, "PATCH", &path, Some(completion(&found, args)?)).map(|_| ())
 }
 
 pub fn changes(args: &UpdateArgs) -> Value {
@@ -218,6 +238,37 @@ mod tests {
             description: None,
         };
         assert_eq!(changes(&title), json!({ "title": "Export" }));
+    }
+
+    #[test]
+    fn completes_with_the_method_and_branch_asked() {
+        let found = json!({
+            "lastMergeSourceCommit": { "commitId": "3aae" },
+            "completionOptions": { "mergeCommitMessage": "Merged PR 5", "deleteSourceBranch": true }
+        });
+        let asked = |method: Option<&str>, delete_branch| MergeArgs {
+            number: 5,
+            method: method.map(str::to_string),
+            delete_branch,
+        };
+        assert_eq!(
+            completion(&found, &asked(None, None)),
+            Ok(json!({ "status": "completed", "lastMergeSourceCommit": { "commitId": "3aae" } }))
+        );
+        assert_eq!(
+            completion(&found, &asked(Some("rebase"), Some(false))).unwrap()["completionOptions"],
+            json!({ "mergeCommitMessage": "Merged PR 5", "deleteSourceBranch": false, "mergeStrategy": "rebase" })
+        );
+        let squash = completion(&json!({}), &asked(Some("squash"), None)).unwrap();
+        assert_eq!(
+            squash["completionOptions"],
+            json!({ "mergeStrategy": "squash" })
+        );
+        assert_eq!(
+            completion(&found, &asked(Some("merge"), None)).unwrap()["completionOptions"]["mergeStrategy"],
+            "noFastForward"
+        );
+        assert!(completion(&found, &asked(Some("fast-forward"), None)).is_err());
     }
 
     #[test]
