@@ -67,16 +67,19 @@ pub fn me_id(repo: &Repo) -> Result<String, String> {
 
 pub fn filled(repo: &Repo, found: &[&Value], me: &str) -> Vec<Pull> {
     let slug = repo.slug();
+    let urls: Vec<String> = found
+        .iter()
+        .flat_map(|pull| {
+            let path = repo.pull_api(pull["pullRequestId"].as_u64().unwrap_or_default());
+            [format!("{path}/statuses"), format!("{path}/threads")]
+        })
+        .collect();
+    let mut answers = api::many(&repo.account, &urls).into_iter();
     found
         .iter()
         .map(|pull| {
-            let path = repo.pull_api(pull["pullRequestId"].as_u64().unwrap_or_default());
-            let statuses = repo
-                .get(&format!("{path}/statuses"), &[])
-                .unwrap_or_default();
-            let threads = repo
-                .get(&format!("{path}/threads"), &[])
-                .unwrap_or_default();
+            let statuses = answers.next().unwrap_or_default();
+            let threads = answers.next().unwrap_or_default();
             pulls::pull_of(pull, &statuses, &threads, me, &slug)
         })
         .collect()

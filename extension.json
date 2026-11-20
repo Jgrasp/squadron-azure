@@ -2,7 +2,7 @@
   "id": "azure",
   "version": "0.1.0",
   "api": 1,
-  "squadron": ">=0.54.0",
+  "squadron": ">=0.56.0",
   "name": { "en": "Azure DevOps", "fr": "Azure DevOps" },
   "description": {
     "en": "Pull requests and pipeline builds of your Azure DevOps projects in Squadron: review, comment, merge",

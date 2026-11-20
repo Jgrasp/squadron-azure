@@ -105,6 +105,17 @@ pub fn send(
     answer(host::fetch(&request)?)
 }
 
+pub fn many(account: &str, urls: &[String]) -> Vec<Value> {
+    let requests: Vec<Request> = urls
+        .iter()
+        .map(|u| request("GET", url(u, &[]), account, None))
+        .collect();
+    host::fetch_many(&requests)
+        .into_iter()
+        .map(|r| r.and_then(answer).unwrap_or_default())
+        .collect()
+}
+
 pub fn connection_url(org: &str) -> String {
     format!("{SITE}/{org}/_apis/connectionData?api-version=7.1-preview")
 }
