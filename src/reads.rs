@@ -66,21 +66,34 @@ pub fn me_id(repo: &Repo) -> Result<String, String> {
 }
 
 pub fn filled(repo: &Repo, found: &[&Value], me: &str) -> Vec<Pull> {
+    let Some(first) = found.first() else {
+        return vec![];
+    };
     let slug = repo.slug();
-    let urls: Vec<String> = found
-        .iter()
-        .flat_map(|pull| {
+    let policies = format!(
+        "{SITE}/{}/{}/_apis/git/policy/configurations?repositoryId={}",
+        repo.org,
+        repo.project,
+        api::encode(&text(&first["repository"]["id"]))
+    );
+    let urls: Vec<String> = [policies, repo.repository()]
+        .into_iter()
+        .chain(found.iter().flat_map(|pull| {
             let path = repo.pull_api(pull["pullRequestId"].as_u64().unwrap_or_default());
             [format!("{path}/statuses"), format!("{path}/threads")]
-        })
+        }))
         .collect();
     let mut answers = api::many(&repo.account, &urls).into_iter();
+    let policies = answers.next().unwrap_or_default();
+    let repository = answers.next().unwrap_or_default();
     found
         .iter()
         .map(|pull| {
             let statuses = answers.next().unwrap_or_default();
             let threads = answers.next().unwrap_or_default();
-            pulls::pull_of(pull, &statuses, &threads, me, &slug)
+            let mut filled = pulls::pull_of(pull, &statuses, &threads, me, &slug);
+            pulls::merging(&mut filled, pull, &policies, &repository);
+            filled
         })
         .collect()
 }

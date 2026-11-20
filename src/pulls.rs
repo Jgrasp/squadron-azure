@@ -55,6 +55,75 @@ fn checks(statuses: &Value) -> Option<String> {
     }
 }
 
+pub const MERGE_STRATEGY: &str = "fa4e907d-c16b-4a4c-9dfa-4916e5d171ab";
+
+fn covers(scope: &Value, repository: &Value, refname: &str) -> bool {
+    let id = &scope["repositoryId"];
+    let target = scope["refName"].as_str();
+    (id.is_null() || *id == repository["id"])
+        && match scope["matchKind"]
+            .as_str()
+            .map(str::to_lowercase)
+            .as_deref()
+        {
+            Some("exact") => target == Some(refname),
+            Some("prefix") => target.is_some_and(|t| refname.starts_with(t)),
+            Some("defaultbranch") => repository["defaultBranch"] == refname,
+            _ => target == Some(refname),
+        }
+}
+
+fn applying<'a>(
+    policies: &'a [Value],
+    repository: &'a Value,
+    refname: &'a str,
+) -> impl Iterator<Item = &'a Value> {
+    policies.iter().filter(move |p| {
+        p["isEnabled"] == true
+            && p["isBlocking"] == true
+            && p["isDeleted"] != true
+            && list(&p["settings"]["scope"])
+                .iter()
+                .any(|s| covers(s, repository, refname))
+    })
+}
+
+fn allowed(settings: &Value) -> [bool; 3] {
+    let keys = ["allowNoFastForward", "allowSquash", "allowRebase"];
+    if keys.iter().any(|k| settings[k].is_boolean()) {
+        keys.map(|k| settings[k] == true)
+    } else {
+        let squash = settings["useSquashMerge"] == true;
+        [!squash, squash, false]
+    }
+}
+
+pub fn merging(pull: &mut Pull, found: &Value, policies: &Value, repository: &Value) {
+    let Some(policies) = policies.get("value").unwrap_or(policies).as_array() else {
+        return;
+    };
+    let source = text(&found["sourceRefName"]);
+    let target = text(&found["targetRefName"]);
+    let protected = applying(policies, repository, &source).next().is_some();
+    let mut open = [true, true, !protected];
+    for policy in applying(policies, repository, &target).filter(|p| {
+        p["type"]["id"] == MERGE_STRATEGY || p["type"]["displayName"] == "Require a merge strategy"
+    }) {
+        let rule = allowed(&policy["settings"]);
+        open = [0, 1, 2].map(|i| open[i] && rule[i]);
+    }
+    pull.merge_methods = ["merge", "squash", "rebase"]
+        .into_iter()
+        .zip(open)
+        .filter(|(_, o)| *o)
+        .map(|(m, _)| m.to_string())
+        .collect();
+    pull.branch_protected = protected;
+    pull.delete_branch =
+        Some(!protected && found["completionOptions"]["deleteSourceBranch"] == true);
+    pull.delete_branch_settable = true;
+}
+
 pub fn pull_of(found: &Value, statuses: &Value, threads: &Value, me: &str, slug: &str) -> Pull {
     let people = list(&found["reviewers"]);
     let approvals = people.iter().filter(|p| verdict(p) == "approved").count() as u32;
@@ -119,6 +188,7 @@ pub fn pull_of(found: &Value, statuses: &Value, threads: &Value, me: &str, slug:
             })
             .collect(),
         conflicts: found["mergeStatus"] == "conflicts",
+        ..Pull::default()
     }
 }
 
@@ -186,6 +256,7 @@ pub mod tests {
                 ],
                 conflicts: false,
                 mergeable: true,
+                ..Pull::default()
             }
         );
         let mut rejected = found.clone();
@@ -225,5 +296,75 @@ pub mod tests {
         draft["status"] = json!("abandoned");
         let pull = pull_of(&draft, &Value::Null, &Value::Null, "", "o/p/r");
         assert_eq!((pull.state.as_str(), pull.draft), ("closed", true));
+    }
+
+    #[test]
+    fn reads_merge_types_and_protection_from_branch_policies() {
+        let repository = json!({ "id": "r1", "defaultBranch": "refs/heads/main" });
+        let found = json!({
+            "sourceRefName": "refs/heads/feat/x", "targetRefName": "refs/heads/main",
+            "completionOptions": { "deleteSourceBranch": true }
+        });
+        let policy = |scope: Value, settings: Value| {
+            let mut settings = settings;
+            settings["scope"] = json!([scope]);
+            json!({ "isEnabled": true, "isBlocking": true, "type": { "id": MERGE_STRATEGY }, "settings": settings })
+        };
+        let read = |policies: Value| {
+            let mut pull = Pull::default();
+            merging(&mut pull, &found, &policies, &repository);
+            (
+                pull.merge_methods,
+                pull.delete_branch,
+                pull.branch_protected,
+            )
+        };
+        let all = vec!["merge".to_string(), "squash".into(), "rebase".into()];
+        assert_eq!(
+            read(json!({ "count": 0, "value": [] })),
+            (all.clone(), Some(true), false)
+        );
+        assert_eq!(read(Value::Null), (vec![], None, false));
+        let exact = policy(
+            json!({ "repositoryId": "r1", "refName": "refs/heads/main", "matchKind": "Exact" }),
+            json!({ "allowSquash": true, "allowRebase": true, "allowNoFastForward": false }),
+        );
+        let wide = policy(
+            json!({ "repositoryId": null, "matchKind": "DefaultBranch" }),
+            json!({ "allowSquash": true, "allowNoFastForward": true }),
+        );
+        assert_eq!(read(json!({ "value": [exact, wide] })).0, vec!["squash"]);
+        let mut disabled = exact.clone();
+        disabled["isEnabled"] = json!(false);
+        let other = policy(
+            json!({ "repositoryId": "r2", "refName": "refs/heads/main", "matchKind": "Exact" }),
+            json!({ "allowSquash": true }),
+        );
+        assert_eq!(read(json!([disabled, other])).0, all);
+        let legacy = policy(
+            json!({ "repositoryId": "r1", "refName": "refs/heads/", "matchKind": "prefix" }),
+            json!({ "useSquashMerge": true }),
+        );
+        assert_eq!(
+            read(json!([legacy])),
+            (vec!["squash".to_string()], Some(false), true)
+        );
+        let reviewers = json!({
+            "isEnabled": true, "isBlocking": true, "type": { "id": "other" },
+            "settings": { "scope": [{ "repositoryId": "r1", "refName": "refs/heads/feat/", "matchKind": "Prefix" }] }
+        });
+        let file_size = json!({
+            "isEnabled": true, "isBlocking": true, "type": { "id": "other" },
+            "settings": { "scope": [{ "repositoryId": "r1" }] }
+        });
+        assert_eq!(read(json!([file_size])), (all.clone(), Some(true), false));
+        assert_eq!(
+            read(json!([reviewers])),
+            (
+                vec!["merge".to_string(), "squash".into()],
+                Some(false),
+                true
+            )
+        );
     }
 }

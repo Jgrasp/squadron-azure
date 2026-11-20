@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.0 · 2026-11-20
+
+- Merging a pull request offers the merge types its target branch allows: merge, squash, or rebase and fast-forward
+- Merging can delete the source branch, as the pull request's completion options say, unless branch policies protect it
+
 ## 0.1.0 · 2026-11-20
 
 - Pull requests of your Azure DevOps projects in Squadron: the pull request of each agent's branch, the ones to review, yours and the others, with their checks and reviewers
