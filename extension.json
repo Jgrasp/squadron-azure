@@ -1,0 +1,52 @@
+{
+  "id": "azure",
+  "version": "0.1.0",
+  "api": 1,
+  "squadron": ">=0.56.0",
+  "name": { "en": "Azure DevOps", "fr": "Azure DevOps" },
+  "description": {
+    "en": "Pull requests and pipeline builds of your Azure DevOps projects in Squadron: review, comment, merge",
+    "fr": "Les pull requests et les builds de pipelines de vos projets Azure DevOps dans Squadron : relire, commenter, fusionner"
+  },
+  "logo": "logo.svg",
+  "wasm": "target/wasm32-wasip2/release/azure.wasm",
+  "permissions": { "network": ["dev.azure.com"] },
+  "contributes": {
+    "accounts": {
+      "label": { "en": "Azure DevOps organizations", "fr": "Organisations Azure DevOps" },
+      "check": true,
+      "fields": [
+        {
+          "id": "organization",
+          "label": { "en": "Organization", "fr": "Organisation" },
+          "hint": {
+            "en": "Its name alone, as in dev.azure.com/<name>",
+            "fr": "Son nom seul, comme dans dev.azure.com/<nom>"
+          }
+        },
+        {
+          "id": "token",
+          "label": { "en": "Personal access token", "fr": "Jeton d’accès personnel" },
+          "kind": "secret",
+          "hint": {
+            "en": "Create a token named Squadron with the Code (Read & write) and Build (Read) scopes",
+            "fr": "Créez un jeton nommé Squadron avec les scopes Code (Read & write) et Build (Read)"
+          },
+          "url": "https://learn.microsoft.com/azure/devops/organizations/accounts/use-personal-access-tokens-to-authenticate"
+        }
+      ]
+    },
+    "forge": {
+      "remotes": [
+        "^dev\\.azure\\.com/(?<org>[A-Za-z0-9_.-]+)/(?<project>[^/?#]+)/_git/(?<name>[^/?#]+)$",
+        "^(?:ssh\\.dev\\.azure\\.com|vs-ssh\\.visualstudio\\.com)/v3/(?<org>[A-Za-z0-9_.-]+)/(?<project>[^/?#]+)/(?<name>[^/?#]+)$",
+        "^(?<org>[A-Za-z0-9_.-]+)\\.visualstudio\\.com/(?:[^?#]*/)?(?<project>[^/?#]+)/_git/(?<name>[^/?#]+)$"
+      ],
+      "links": [
+        "https?://(?:www\\.)?dev\\.azure\\.com/(?<org>[A-Za-z0-9_.-]+)/(?<project>[^/?#\\s]+)/_git/(?<name>[^/?#\\s]+)/pullrequest/(?<number>[0-9]+)",
+        "https?://(?<org>[A-Za-z0-9_.-]+)\\.visualstudio\\.com/(?:[^/?#\\s]+/)*(?<project>[^/?#\\s]+)/_git/(?<name>[^/?#\\s]+)/pullrequest/(?<number>[0-9]+)"
+      ],
+      "calls": ["pull", "numbered", "lists", "remarks", "me", "reply", "resolve", "post", "merge", "update", "runs"]
+    }
+  }
+}
