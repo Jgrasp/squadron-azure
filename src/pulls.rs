@@ -69,7 +69,7 @@ fn covers(scope: &Value, repository: &Value, refname: &str) -> bool {
             Some("exact") => target == Some(refname),
             Some("prefix") => target.is_some_and(|t| refname.starts_with(t)),
             Some("defaultbranch") => repository["defaultBranch"] == refname,
-            _ => target.is_none(),
+            _ => target == Some(refname),
         }
 }
 
@@ -353,6 +353,11 @@ pub mod tests {
             "isEnabled": true, "isBlocking": true, "type": { "id": "other" },
             "settings": { "scope": [{ "repositoryId": "r1", "refName": "refs/heads/feat/", "matchKind": "Prefix" }] }
         });
+        let file_size = json!({
+            "isEnabled": true, "isBlocking": true, "type": { "id": "other" },
+            "settings": { "scope": [{ "repositoryId": "r1" }] }
+        });
+        assert_eq!(read(json!([file_size])), (all.clone(), Some(true), false));
         assert_eq!(
             read(json!([reviewers])),
             (
