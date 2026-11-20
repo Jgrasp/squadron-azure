@@ -1,8 +1,8 @@
 use crate::api;
-use crate::reads::{Repo, me_id};
+use crate::reads::{Repo, filled, me_id};
 use serde_json::{Map, Value, json};
 use squadron_extension_api::forge::{
-    Draft, MergeArgs, PostArgs, Posted, ReplyArgs, ResolveArgs, UpdateArgs,
+    self, CreateArgs, Draft, MergeArgs, PostArgs, Posted, Pull, ReplyArgs, ResolveArgs, UpdateArgs,
 };
 
 pub fn remark_id(to: &str) -> Result<(u64, u64), String> {
@@ -175,6 +175,70 @@ pub fn update(repo: &Repo, args: &UpdateArgs) -> Result<(), String> {
     .map(|_| ())
 }
 
+pub const DESCRIBED: usize = 4000;
+
+pub fn opening(args: &CreateArgs) -> Value {
+    let mut length = 0;
+    let description: String = args
+        .description
+        .chars()
+        .take_while(|c| {
+            length += c.len_utf16();
+            length <= DESCRIBED
+        })
+        .collect();
+    json!({
+        "sourceRefName": format!("refs/heads/{}", args.branch),
+        "targetRefName": format!("refs/heads/{}", args.base),
+        "title": args.title,
+        "description": description,
+        "isDraft": args.draft,
+    })
+}
+
+pub fn opened(error: String) -> String {
+    if !error.contains("TF401179") {
+        return error;
+    }
+    forge::failure(
+        Some("exists"),
+        json!({
+            "en": "This branch already has an active pull request into this base",
+            "fr": "Cette branche a déjà une pull request active vers cette base",
+        }),
+        Some(json!({
+            "en": "Azure DevOps opens only one active pull request per source and target branch. Complete or abandon the existing one first.",
+            "fr": "Azure DevOps n’ouvre qu’une pull request active par branche source et cible. Terminez ou abandonnez d’abord celle qui existe.",
+        })),
+    )
+}
+
+pub fn creating(
+    repo: &Repo,
+    args: &CreateArgs,
+    post: impl FnOnce(&str, Value) -> Result<Value, String>,
+    fill: impl FnOnce(&Value) -> Pull,
+) -> Result<Pull, String> {
+    let created = post(
+        &format!("{}/pullrequests", repo.repository()),
+        opening(args),
+    )
+    .map_err(opened)?;
+    Ok(fill(&created))
+}
+
+pub fn create(repo: &Repo, args: &CreateArgs) -> Result<Pull, String> {
+    creating(
+        repo,
+        args,
+        |url, body| send(repo, "POST", url, Some(body)),
+        |created| {
+            let me = me_id(repo).unwrap_or_default();
+            filled(repo, &[created], &me).remove(0)
+        },
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,5 +348,129 @@ mod tests {
             plain("Azure DevOps answered 400: no".into()),
             "Azure DevOps answered 400: no"
         );
+    }
+
+    #[test]
+    fn opens_a_pull_request_azure_devops_accepts() {
+        let asked = CreateArgs {
+            branch: "feat/x".into(),
+            base: "main".into(),
+            title: "Export to Xero".into(),
+            description: "Sends the ledger".into(),
+            draft: true,
+        };
+        assert_eq!(
+            opening(&asked),
+            json!({
+                "sourceRefName": "refs/heads/feat/x",
+                "targetRefName": "refs/heads/main",
+                "title": "Export to Xero",
+                "description": "Sends the ledger",
+                "isDraft": true
+            })
+        );
+        let long = CreateArgs {
+            description: format!("{}é😀", "a".repeat(DESCRIBED - 2)),
+            ..asked
+        };
+        let sent = opening(&long);
+        let sent = sent["description"].as_str().unwrap();
+        assert_eq!(sent, format!("{}é", "a".repeat(DESCRIBED - 2)));
+        assert!(sent.encode_utf16().count() <= DESCRIBED);
+    }
+
+    #[test]
+    fn explains_an_existing_pull_request() {
+        let exists: Value = serde_json::from_str(&opened(
+            "Azure DevOps answered 409: TF401179: An active pull request for the source and target branch already exists.".into(),
+        ))
+        .unwrap();
+        assert_eq!(exists["code"], "exists");
+        assert!(exists["title"]["en"].is_string() && exists["title"]["fr"].is_string());
+        assert!(exists["detail"]["en"].is_string() && exists["detail"]["fr"].is_string());
+        assert_eq!(
+            opened("Azure DevOps answered 400: no".into()),
+            "Azure DevOps answered 400: no"
+        );
+    }
+
+    #[test]
+    fn creates_and_answers_the_pull_request() {
+        let repo = Repo {
+            account: "a1".into(),
+            org: "org".into(),
+            project: "proj".into(),
+            name: "shop".into(),
+        };
+        let asked = CreateArgs {
+            branch: "feat/x".into(),
+            base: "main".into(),
+            title: "Export to Xero".into(),
+            description: "Sends the ledger".into(),
+            draft: true,
+        };
+        let mut posted = None;
+        let pull = creating(
+            &repo,
+            &asked,
+            |url, body| {
+                posted = Some((url.to_string(), body.clone()));
+                Ok(json!({
+                    "pullRequestId": 21, "status": "active", "isDraft": body["isDraft"],
+                    "title": body["title"], "description": body["description"],
+                    "sourceRefName": body["sourceRefName"], "targetRefName": body["targetRefName"],
+                    "mergeStatus": "queued", "creationDate": "2026-11-20T16:00:00Z",
+                    "createdBy": { "displayName": "Quentin Briais" },
+                    "lastMergeSourceCommit": { "commitId": "9f1c" }
+                }))
+            },
+            |created| crate::pulls::pull_of(created, &Value::Null, &Value::Null, "", &repo.slug()),
+        )
+        .unwrap();
+        let (url, body) = posted.unwrap();
+        assert_eq!(
+            url,
+            "https://dev.azure.com/org/proj/_apis/git/repositories/shop/pullrequests"
+        );
+        assert_eq!(
+            (
+                &body["sourceRefName"],
+                &body["targetRefName"],
+                &body["isDraft"]
+            ),
+            (
+                &json!("refs/heads/feat/x"),
+                &json!("refs/heads/main"),
+                &json!(true)
+            )
+        );
+        assert_eq!(
+            (
+                pull.number,
+                pull.draft,
+                pull.state.as_str(),
+                pull.branch.as_str(),
+                pull.base.as_str(),
+                pull.title.as_str(),
+                pull.url.as_str()
+            ),
+            (
+                21,
+                true,
+                "open",
+                "feat/x",
+                "main",
+                "Export to Xero",
+                "https://dev.azure.com/org/proj/_git/shop/pullrequest/21"
+            )
+        );
+        let refused = creating(
+            &repo,
+            &asked,
+            |_, _| Err("Azure DevOps answered 409: TF401179: An active pull request for the source and target branch already exists.".into()),
+            |_| unreachable!(),
+        )
+        .unwrap_err();
+        assert!(refused.contains("\"code\":\"exists\""));
     }
 }

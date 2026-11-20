@@ -1,5 +1,11 @@
 # Journal des modifications
 
+## 0.3.0 · 2026-11-20
+
+- Ouvrez une pull request depuis la branche poussée d’un agent, en brouillon si vous le souhaitez, avec le bouton Ouvrir une pull request de Squadron
+- Une description plus longue que les 4 000 caractères acceptés par Azure DevOps est coupée à 4 000
+- Une branche qui a déjà une pull request active vers la même base reçoit un message clair
+
 ## 0.2.0 · 2026-11-20
 
 - La fusion d’une pull request propose les types de fusion qu’autorise sa branche cible : merge, squash, ou rebase et fast-forward

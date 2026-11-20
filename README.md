@@ -15,6 +15,7 @@ Every project whose `origin` is on `dev.azure.com`, `ssh.dev.azure.com` or `<org
 
 - the pull request of each agent's branch, and chips for the pull request links in conversations;
 - the pull requests to review, yours and the others, with their checks and reviewers;
+- pull requests opened from an agent's pushed branch;
 - reviews with line comments, a summary and a vote, replies to remarks, resolved threads, merges, and title and description changes, from you or from an agent;
 - the pipeline builds, with a notification when one ends.
 
@@ -22,7 +23,7 @@ Every project whose `origin` is on `dev.azure.com`, `ssh.dev.azure.com` or `<org
 
 - HTTPS requests to `dev.azure.com`, Azure DevOps' API. Repositories cloned from `*.visualstudio.com` are read through `dev.azure.com` too.
 - Azure DevOps accounts: each token stays in the system keyring. Squadron adds the organization and token to the requests to Azure DevOps, and the extension never reads the token.
-  - **Code (Read & write)** reads the pull requests, their threads and statuses, and comments, votes, resolves threads, merges and edits them.
+  - **Code (Read & write)** reads the pull requests, their threads and statuses, and opens, comments, votes, resolves threads, merges and edits them.
   - **Build (Read)** shows the pipeline builds.
 
 ## Build
