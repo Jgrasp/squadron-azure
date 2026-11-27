@@ -1,6 +1,6 @@
 # Azure DevOps
 
-A [Squadron](https://github.com/Jgrasp/squadron) extension that brings the pull requests and pipeline builds of your Azure DevOps projects into Squadron.
+A [Squadron](https://github.com/akki-team/squadron) extension that brings the pull requests and pipeline builds of your Azure DevOps projects into Squadron.
 
 ## Use
 
